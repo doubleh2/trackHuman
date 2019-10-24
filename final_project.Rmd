@@ -1,0 +1,183 @@
+---
+title: "Human Activity Recognition Analysis"
+author: "H Hansen"
+date: "4/14/2017"
+output:
+  word_document: default
+  html_document: default
+---
+
+## Executive Summary
+This is a project for the Machine Learning Course for the Data Science certificate program. The goal of the project was to develop a machine learning alorgythm that would correctly identify exersizes that work perfomed properly. The data set consists of a the following:
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)."(Velloso, 2013)
+
+Devies such as gyros and accelerameters measured key movments of the participant and weight. These measurements were deivideed into a training set and test test. Models were fitted against the classe viariable, which defined wether the movement was perfectly perforect or contained some error. The clasification models chosen were a classification tree (i.e CART/rpart), random forest, boost, and bagging. 
+
+The CART model performed poorly. The other models had better out of sample error(OSE) and performance. The the end, the ndom forest, boost, and bagging performed equally, althought techinically the boost model had the best accuracy statitics. 
+
+## Data Processing
+The data summary indicated that some variable were not direct measures variable. These were identifed and moved. Additianally, a training and valiation set were used for cross validation. The validation set will be used to measure OSE.  
+
+```{r setup, echo=T}
+
+library(caret)
+
+#read in data
+train <- read.csv("/Users/hunterhansen/OneDrive/coursera/8-Machine\ Learning/pml-training.csv", stringsAsFactors=FALSE)
+test <-  read.csv("/Users/hunterhansen/OneDrive/coursera/8-Machine\ Learning/pml-testing.csv", stringsAsFactors=FALSE)
+
+# summarize data
+summ<- function(x){
+dim(x)
+sapply(x, class)
+summary(x)
+str(x)
+}
+
+dim(train);  dim(test)
+
+## preprocessing 
+
+# change classe to factor
+train$classe<- as.factor(train$classe)
+
+## clean the data
+ 
+#take out non-activity data 
+
+training<- train[,c(8:ncol(train))]
+      
+# calculate % of NA by col
+boo<- apply(training, 2, function(col)sum(is.na(col))/length(col))
+
+#find all col w a lot of NA
+result <- matrix()
+for (i in 1:length(boo)){
+  if (boo[i] > 0){
+    result <- c(result,names(boo[i]))
+  }
+}
+
+#delte all col with high NA %
+foo<- training[ , -which(names(training) %in% result)]
+
+# deleted all col with class char
+
+final<- foo[,-which(sapply(foo, class) == "character")]
+##final <- final[,c(3:ncol(final))]
+training <- final
+
+#take out non-activity data 
+testing<- test[,c(8:ncol(test))]
+      
+# calculate % of NA by col
+boo<- apply(testing, 2, function(col)sum(is.na(col))/length(col))
+
+#find all col w a lot of NA
+result <- matrix()
+for (i in 1:length(boo)){
+  if (boo[i] > 0){
+    result <- c(result,names(boo[i]))
+  }
+}
+
+#delte all col with high NA %
+foo<- testing[ , -which(names(testing) %in% result)]
+ 
+testing <- foo
+
+# create training and validation sets
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+train <- training[inTrain,]
+val <- training[-inTrain,]
+
+```
+
+## Building the Models
+Since the outcome variable (i.e classe) was a factor variable, a classifcation model was selcted. Using confusion matrixies, the models were evaluated. Finally all were compared, using the accuracy statistics. While the boost model preformed best.  
+
+
+```{r}
+
+## build models
+#1 classification tree
+ModelZero <- train(classe ~ .,data=train, method="rpart")
+
+plot(ModelZero$finalModel, uniform=TRUE, main="Classification Tree")
+text(ModelZero$finalModel, use.n=TRUE, all=TRUE, cex=.8) # plot 1
+
+pd <- predict(ModelZero, val)
+cfm<- confusionMatrix(pd, val$classe)
+cfm$table
+ 
+#2 random forest model
+set.seed(123)
+ModelUno<- train(classe ~ ., method = "rf",     data = train, importance = T,     trControl = trainControl(method = "cv", number = 3))
+
+v <- varImp(ModelUno)
+plot(v, top = 10) # plot 2
+
+# out of sample error
+pd1<- predict(ModelUno, val)
+cfm1<- confusionMatrix(pd1, val$classe)
+
+# 3 bagging model
+ModelDos <- train(classe ~ .,data=train,method="treebag")
+pd2 <- predict(ModelDos, val)
+cfm2 <- confusionMatrix(pd2, val$classe)
+cfm2$overall
+plot(varImp(ModelDos), top = 10) #plot 3
+
+## 4 boosting model
+ModelTres <- train(classe ~ ., method = "gbm",  data = train, verbose = F, trControl = trainControl(method = "cv", number = 3))
+
+pd3 <- predict(ModelTres, val)
+cfm3 <- confusionMatrix(pd3, val$classe)
+cfm3$overall
+plot(ModelTres) # plot 4
+
+# select  prediction  model 
+
+selectit <- data.frame(tree=cfm$overall[1],   rf=cfm1$overall[1], bagging=cfm2$overall[1],  boosting=cfm3$overall[1])
+
+#plot model comparison
+par(mfrow=c(2,2))
+lables=LETTERS[1:5]
+cex= 0.7
+
+plotit <- function(x,y){
+  par(mar=c(1,1,1,1))
+  plot(x$byClass, main=y)
+  text(x$byClass[,1], x$byClass[,2], labels=lables, cex=cex )
+  
+}
+ 
+plotit(cfm,"classification tree")
+plotit(cfm1, "random forest")
+plotit(cfm2, "bagging")
+plotit(cfm3,"boosting")
+
+selectit
+
+#prediction
+results <- as.character(predict(ModelUno, test))
+results2 <- as.character(predict(ModelDos, test))
+results3 <- as.character(predict(ModelTres, test))
+
+list<- c(results,results2, results3)
+
+equalR <- identical(results, results2)
+equalR <- c(equalR, identical(results2, results3))
+equalR <- c(equalR, identical(results, results3))
+equalR
+
+```
+## Conclusion
+This project demonstrates that machine learning can be used to build classifcaiton models for complex data. A simple classification tree, failed to preform very well,  with only about 50% accuraction. Application of other models, random forest, boosting, bagging lead to better results do to averaging of trees methods.   The main question of the project asks, can machine learning develop models to predict accurately the quality of activity as opposed to quantity. The results suggest this is likely. 
+
+## Reference
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz4eKrNXrNM
+
